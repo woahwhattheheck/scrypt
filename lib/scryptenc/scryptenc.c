@@ -369,6 +369,8 @@ int
 scryptdec_file_printparams(FILE * infile)
 {
 	uint8_t header[96];
+	uint8_t hbuf[32];
+	SHA256_CTX ctx;
 	int logN;
 	uint32_t r;
 	uint32_t p;
@@ -377,6 +379,15 @@ scryptdec_file_printparams(FILE * infile)
 	/* Load the header. */
 	if ((rc = scryptdec_file_load_header(infile, header)) != 0)
 		goto err0;
+
+	/* Verify header checksum. */
+	SHA256_Init(&ctx);
+	SHA256_Update(&ctx, header, 48);
+	SHA256_Final(hbuf, &ctx);
+	if (crypto_verify_bytes(&header[48], hbuf, 16)) {
+		rc = SCRYPT_EINVAL;
+		goto err0;
+	}
 
 	/* Parse N, r, p. */
 	logN = header[7];
