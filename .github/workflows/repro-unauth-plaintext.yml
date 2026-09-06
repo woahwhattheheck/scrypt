@@ -1,4 +1,4 @@
-name: Repro - unauthenticated plaintext left on disk
+name: Repro - scrypt dec aborts on explicit params
 
 on:
   push:
@@ -19,49 +19,44 @@ jobs:
         autoreconf -i
         ./configure
         make
+        ./scrypt --version || true
     - name: Repro
       run: |
-        set -x
         SCRYPT=./scrypt
         PW=hunter2
-        # Fast KDF params; -f skips the resource checks.
-        P="-f --logN 10 -r 1 -p 1 --passphrase dev:stdin-once"
+        echo "AAAA" > plain.txt
+        echo "$PW" | $SCRYPT enc -f --logN 10 -r 1 -p 1 --passphrase dev:stdin-once plain.txt good.enc
 
-        # A 1000-byte plaintext: well under ENCBLOCK, to show the leak is
-        # NOT limited to large files.
-        python3 -c "import sys; sys.stdout.write('A'*1000)" > plain.txt
-        wc -c plain.txt
-
-        echo "$PW" | $SCRYPT enc $P plain.txt good.enc
-        wc -c good.enc
-
-        echo "===== CASE 1: truncated ciphertext (drop last byte) ====="
-        head -c $(( $(wc -c < good.enc) - 1 )) good.enc > trunc.enc
-        wc -c trunc.enc
-        rm -f out1.txt
+        echo "===== CONTROL: plain dec works ====="
         set +e
-        echo "$PW" | $SCRYPT dec $P trunc.enc out1.txt
-        echo "scrypt dec exit status: $?"
+        echo "$PW" | $SCRYPT dec -f --passphrase dev:stdin-once good.enc ok.txt
+        echo "control exit status: $?"
         set -e
-        echo "--- out1.txt left behind? ---"
-        ls -l out1.txt || echo "ABSENT (good)"
-        echo "bytes written: $(wc -c < out1.txt 2>/dev/null || echo 0)"
-        echo "first 64 bytes:"; head -c 64 out1.txt | od -c | head -4
+        cmp plain.txt ok.txt && echo "control roundtrip OK"
 
-        echo "===== CASE 2: bit-flip in body (attacker-controlled output) ====="
-        # Flip the low bit of ciphertext byte 96 (first body byte).  CTR mode
-        # means this flips exactly the same bit of the decrypted plaintext.
-        python3 - <<'PY'
-        d = bytearray(open('good.enc','rb').read())
-        d[96] ^= 0x01
-        open('flip.enc','wb').write(bytes(d))
-        PY
-        rm -f out2.txt
+        echo
+        echo "===== BUG: dec with explicit params (documented as enc-only) ====="
+        for ARGS in "--logN 10 -r 1 -p 1" "--logN 10 -r 1 -p 1" ; do :; done
+        rm -f out.txt
         set +e
-        echo "$PW" | $SCRYPT dec $P flip.enc out2.txt
-        echo "scrypt dec exit status: $?"
+        echo "$PW" | $SCRYPT dec -f --logN 10 -r 1 -p 1 --passphrase dev:stdin-once good.enc out.txt
+        rc=$?
         set -e
-        echo "--- out2.txt left behind? ---"
-        ls -l out2.txt || echo "ABSENT (good)"
-        echo "bytes written: $(wc -c < out2.txt 2>/dev/null || echo 0)"
-        echo "first byte should be 'A'^1 = '@':"; head -c 8 out2.txt | od -c | head -2
+        echo "exit status: $rc   (134 = 128 + SIGABRT)"
+        if [ "$rc" -eq 134 ]; then echo "RESULT: SIGABRT / assertion failure"; else echo "RESULT: exited $rc"; fi
+        echo "--- was the output file created? ---"
+        ls -l out.txt 2>/dev/null || echo "out.txt ABSENT - so no data loss, crash happens before the output is opened"
+
+        echo
+        echo "===== same via short-form -r / -p only (all-or-none rejects these) ====="
+        set +e
+        echo "$PW" | $SCRYPT dec -f -r 1 --passphrase dev:stdin-once good.enc out2.txt
+        echo "  -r alone exit status: $? (expected 1, clean error)"
+        set -e
+
+        echo
+        echo "===== info mode with explicit params (control) ====="
+        set +e
+        $SCRYPT info --logN 10 -r 1 -p 1 good.enc
+        echo "  info exit status: $?"
+        set -e
