@@ -25,6 +25,9 @@
  */
 #include "platform.h"
 
+#include <sys/types.h>
+#include <sys/stat.h>
+
 #include <errno.h>
 #include <math.h>
 #include <stdint.h>
@@ -97,6 +100,37 @@ err0:
 }
 
 /**
+ * same_file(infile, outfilename):
+ * Return non-zero if the already-open ${infile} and the path ${outfilename}
+ * refer to the same regular file.  If we cannot tell -- most importantly if
+ * ${outfilename} does not exist yet -- return zero.
+ */
+static int
+same_file(FILE * infile, const char * outfilename)
+{
+	struct stat sb_in;
+	struct stat sb_out;
+
+	/* If we can't stat either file, assume that they're different. */
+	if (fstat(fileno(infile), &sb_in))
+		return (0);
+	if (stat(outfilename, &sb_out))
+		return (0);
+
+	/*
+	 * Only a regular file can be destroyed this way; opening a character
+	 * device such as /dev/null for writing does not discard the data we
+	 * are about to read.
+	 */
+	if (!S_ISREG(sb_in.st_mode) || !S_ISREG(sb_out.st_mode))
+		return (0);
+
+	/* The same device and inode is the same file. */
+	return ((sb_in.st_dev == sb_out.st_dev) &&
+	    (sb_in.st_ino == sb_out.st_ino));
+}
+
+/**
  * scrypt_mode_enc_dec(params, passphrase_entry, passphrase_arg, dec, verbose,
  *     force_resources, infilename, outfilename):
  * Either encrypt (if ${dec} is 0) or decrypt (if ${dec} is non-zero)
@@ -127,6 +161,17 @@ scrypt_mode_enc_dec(struct scryptenc_params params,
 		}
 	} else {
 		infile = stdin;
+	}
+
+	/*
+	 * Refuse to write the output into the file we are reading.  Opening
+	 * it for writing truncates it, so we would destroy the data we were
+	 * asked to encrypt or decrypt and then "succeed" in writing an
+	 * encryption of nothing.
+	 */
+	if ((outfilename != NULL) && same_file(infile, outfilename)) {
+		warn0("Input and output files are the same: %s", outfilename);
+		goto err1;
 	}
 
 	/* Get the password. */
