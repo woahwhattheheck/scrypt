@@ -1,4 +1,4 @@
-name: Argument matrix - look for signal deaths
+name: Malformed input sweep
 
 on:
   push:
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
     - name: Install software
-      run: sudo apt-get update && sudo apt-get install --no-install-recommends -y autoconf-archive
+      run: sudo apt-get update && sudo apt-get install --no-install-recommends -y autoconf-archive valgrind
     - name: Checkout code
       uses: actions/checkout@v7
     - name: Build
@@ -23,54 +23,68 @@ jobs:
       run: |
         ulimit -c 0
         python3 - <<'PY'
-        import itertools, subprocess, os, sys
+        import subprocess, os, hashlib, struct
 
         PW = b"hunter2\n"
-        subprocess.run("echo AAAA > plain.txt", shell=True, check=True)
+        open("plain.txt","wb").write(b"A"*4096)
         subprocess.run('echo hunter2 | ./scrypt enc -f --logN 10 -r 1 -p 1 '
                        '--passphrase dev:stdin-once plain.txt good.enc',
                        shell=True, check=True)
+        good = bytearray(open("good.enc","rb").read())
 
-        vals = {
-            "-m":      ["0", "-1", "nan", "NaN", "inf", "-inf", "1e400", "0.5", "1", "2", ""],
-            "-t":      ["0", "-1", "nan", "inf", "-inf", "1e400", ""],
-            "-M":      ["0", "-1", "1", "1P", "abc", "18446744073709551616", ""],
-            "--logN":  ["0", "9", "10", "41", "-1", "64", "18446744073709551616", ""],
-            "-r":      ["0", "1", "33", "-1", "4294967296", ""],
-            "-p":      ["0", "1", "2049", "-1", "4294967296", ""],
-        }
+        def hdr_fix(h):
+            """Recompute the SHA256 header checksum so the file passes that gate."""
+            h = bytearray(h)
+            h[48:64] = hashlib.sha256(bytes(h[0:48])).digest()[:16]
+            return h
 
-        cases = []
-        for mode in ("enc", "dec", "info"):
-            for opt, vs in vals.items():
-                for v in vs:
-                    cases.append([mode, "-f", opt, v])
-        # triples, since logN/r/p are all-or-none
-        for mode in ("enc", "dec", "info"):
-            for a in ["0", "10", "41", "-1"]:
-                for b in ["0", "1", "33"]:
-                    for c in ["0", "1", "2049"]:
-                        cases.append([mode, "-f", "--logN", a, "-r", b, "-p", c])
+        cases = {}
+        cases["empty"] = b""
+        cases["short6"] = b"scrypt"
+        cases["short7"] = b"scrypt\0"
+        cases["magic_bad"] = b"XXXXXX\0" + bytes(89)
+        cases["ver_bad"] = b"scrypt\x01" + bytes(89)
+        cases["hdr95"] = bytes(good[:95])
+        cases["hdr96_only"] = bytes(good[:96])
+        cases["hdr96_zeros"] = b"scrypt\0" + bytes(89)
+        # Header-checksum-valid files with hostile logN / r / p.
+        for name, logN, r, p in [
+            ("logN0",   0, 1, 1), ("logN64",  64, 1, 1), ("logN255", 255, 1, 1),
+            ("logN63",  63, 1, 1), ("r0", 10, 0, 1), ("p0", 10, 1, 0),
+            ("rmax", 10, 0xffffffff, 1), ("pmax", 10, 1, 0xffffffff),
+            ("rp_big", 10, 0x10000, 0x10000),
+        ]:
+            h = bytearray(good)
+            h[7] = logN & 0xff
+            h[8:12] = struct.pack(">I", r)
+            h[12:16] = struct.pack(">I", p)
+            cases[name] = bytes(hdr_fix(h)) + bytes(good[96:])
+        cases["body_trunc"] = bytes(good[:len(good)-1])
+        cases["body_flip"] = bytes(good[:96]) + bytes([good[96]^1]) + bytes(good[97:])
+        cases["all_zero_128"] = bytes(128)
 
         bad = []
-        for i, extra in enumerate(cases):
-            mode = extra[0]
-            args = ["./scrypt"] + extra + ["--passphrase", "dev:stdin-once"]
-            args += ["good.enc"] if mode != "enc" else ["plain.txt"]
-            if mode != "info":
-                args += ["/dev/null"]
-            try:
-                r = subprocess.run(args, input=PW, capture_output=True, timeout=25)
-            except subprocess.TimeoutExpired:
-                bad.append(("TIMEOUT", args, "")); continue
-            if r.returncode < 0 or r.returncode >= 128:
-                bad.append((r.returncode, args, r.stderr.decode()[-300:]))
+        for name, data in cases.items():
+            fn = "case_%s.enc" % name
+            open(fn,"wb").write(data)
+            for mode in ("info", "dec"):
+                args = ["./scrypt", mode]
+                if mode == "dec":
+                    args += ["-f", "--passphrase", "dev:stdin-once", fn, "/dev/null"]
+                else:
+                    args += [fn]
+                try:
+                    r_ = subprocess.run(args, input=PW, capture_output=True, timeout=30)
+                except subprocess.TimeoutExpired:
+                    bad.append(("TIMEOUT", name, mode, "")); continue
+                if r_.returncode < 0 or r_.returncode >= 128:
+                    bad.append((r_.returncode, name, mode, r_.stderr.decode()[-300:]))
 
-        print("ran %d cases" % len(cases))
+        print("ran %d files x 2 modes" % len(cases))
         if not bad:
             print("NO SIGNAL DEATHS")
-        for rc, args, err in bad:
-            print("=" * 70)
-            print("rc=%s  %s" % (rc, " ".join(args)))
+        for rc, name, mode, err in bad:
+            print("="*70)
+            print("rc=%s  mode=%s  case=%s" % (rc, mode, name))
             print(err.strip())
         PY
