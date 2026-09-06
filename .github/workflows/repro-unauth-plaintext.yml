@@ -1,4 +1,4 @@
-name: Repro - scrypt dec aborts on explicit params
+name: Argument matrix - look for signal deaths
 
 on:
   push:
@@ -6,8 +6,8 @@ on:
       - bugreport/unauth-plaintext-on-hmac-failure
 
 jobs:
-  repro:
-    name: Repro
+  matrix:
+    name: Matrix
     runs-on: ubuntu-22.04
     steps:
     - name: Install software
@@ -19,44 +19,58 @@ jobs:
         autoreconf -i
         ./configure
         make
-        ./scrypt --version || true
-    - name: Repro
+    - name: Sweep
       run: |
-        SCRYPT=./scrypt
-        PW=hunter2
-        echo "AAAA" > plain.txt
-        echo "$PW" | $SCRYPT enc -f --logN 10 -r 1 -p 1 --passphrase dev:stdin-once plain.txt good.enc
+        ulimit -c 0
+        python3 - <<'PY'
+        import itertools, subprocess, os, sys
 
-        echo "===== CONTROL: plain dec works ====="
-        set +e
-        echo "$PW" | $SCRYPT dec -f --passphrase dev:stdin-once good.enc ok.txt
-        echo "control exit status: $?"
-        set -e
-        cmp plain.txt ok.txt && echo "control roundtrip OK"
+        PW = b"hunter2\n"
+        subprocess.run("echo AAAA > plain.txt", shell=True, check=True)
+        subprocess.run('echo hunter2 | ./scrypt enc -f --logN 10 -r 1 -p 1 '
+                       '--passphrase dev:stdin-once plain.txt good.enc',
+                       shell=True, check=True)
 
-        echo
-        echo "===== BUG: dec with explicit params (documented as enc-only) ====="
-        for ARGS in "--logN 10 -r 1 -p 1" "--logN 10 -r 1 -p 1" ; do :; done
-        rm -f out.txt
-        set +e
-        echo "$PW" | $SCRYPT dec -f --logN 10 -r 1 -p 1 --passphrase dev:stdin-once good.enc out.txt
-        rc=$?
-        set -e
-        echo "exit status: $rc   (134 = 128 + SIGABRT)"
-        if [ "$rc" -eq 134 ]; then echo "RESULT: SIGABRT / assertion failure"; else echo "RESULT: exited $rc"; fi
-        echo "--- was the output file created? ---"
-        ls -l out.txt 2>/dev/null || echo "out.txt ABSENT - so no data loss, crash happens before the output is opened"
+        vals = {
+            "-m":      ["0", "-1", "nan", "NaN", "inf", "-inf", "1e400", "0.5", "1", "2", ""],
+            "-t":      ["0", "-1", "nan", "inf", "-inf", "1e400", ""],
+            "-M":      ["0", "-1", "1", "1P", "abc", "18446744073709551616", ""],
+            "--logN":  ["0", "9", "10", "41", "-1", "64", "18446744073709551616", ""],
+            "-r":      ["0", "1", "33", "-1", "4294967296", ""],
+            "-p":      ["0", "1", "2049", "-1", "4294967296", ""],
+        }
 
-        echo
-        echo "===== same via short-form -r / -p only (all-or-none rejects these) ====="
-        set +e
-        echo "$PW" | $SCRYPT dec -f -r 1 --passphrase dev:stdin-once good.enc out2.txt
-        echo "  -r alone exit status: $? (expected 1, clean error)"
-        set -e
+        cases = []
+        for mode in ("enc", "dec", "info"):
+            for opt, vs in vals.items():
+                for v in vs:
+                    cases.append([mode, "-f", opt, v])
+        # triples, since logN/r/p are all-or-none
+        for mode in ("enc", "dec", "info"):
+            for a in ["0", "10", "41", "-1"]:
+                for b in ["0", "1", "33"]:
+                    for c in ["0", "1", "2049"]:
+                        cases.append([mode, "-f", "--logN", a, "-r", b, "-p", c])
 
-        echo
-        echo "===== info mode with explicit params (control) ====="
-        set +e
-        $SCRYPT info --logN 10 -r 1 -p 1 good.enc
-        echo "  info exit status: $?"
-        set -e
+        bad = []
+        for i, extra in enumerate(cases):
+            mode = extra[0]
+            args = ["./scrypt"] + extra + ["--passphrase", "dev:stdin-once"]
+            args += ["good.enc"] if mode != "enc" else ["plain.txt"]
+            if mode != "info":
+                args += ["/dev/null"]
+            try:
+                r = subprocess.run(args, input=PW, capture_output=True, timeout=25)
+            except subprocess.TimeoutExpired:
+                bad.append(("TIMEOUT", args, "")); continue
+            if r.returncode < 0 or r.returncode >= 128:
+                bad.append((r.returncode, args, r.stderr.decode()[-300:]))
+
+        print("ran %d cases" % len(cases))
+        if not bad:
+            print("NO SIGNAL DEATHS")
+        for rc, args, err in bad:
+            print("=" * 70)
+            print("rc=%s  %s" % (rc, " ".join(args)))
+            print(err.strip())
+        PY
