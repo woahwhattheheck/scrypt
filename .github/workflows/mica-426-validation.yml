@@ -1,0 +1,60 @@
+name: MICA PR426 header validation
+on:
+  push:
+    branches: [review/mica-426-header-validation-20260906]
+    paths:
+      - tests/mica-426/**
+      - .github/workflows/mica-426-validation.yml
+  workflow_dispatch:
+permissions: {}
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Fetch public source without repository credentials
+        shell: bash
+        env:
+          REVIEW_SHA: ${{ github.sha }}
+        run: |
+          set -euxo pipefail
+          git init .
+          git remote add origin https://github.com/woahwhattheheck/scrypt.git
+          git fetch --no-tags --depth=1 origin "$REVIEW_SHA"
+          git checkout --detach FETCH_HEAD
+          git fetch --no-tags --depth=1 origin a71ae8281742ac638bc75baa4334f2292251e0eb 294338c5853f039630bd1a5d6e0c87ccd4692fff
+          mkdir -p sources results
+          git worktree add --detach sources/base a71ae8281742ac638bc75baa4334f2292251e0eb
+          git worktree add --detach sources/head 294338c5853f039630bd1a5d6e0c87ccd4692fff
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq autoconf-archive automake libtool libssl-dev
+      - name: Build exact source revisions with undefined-behavior instrumentation
+        shell: bash
+        run: |
+          set -euxo pipefail
+          { uname -a; gcc --version; make --version; openssl version; autoconf --version; } | tee results/toolchain.txt
+          for rev in base head; do
+            (
+              cd "sources/$rev"
+              git status --short
+              git rev-parse HEAD HEAD:lib/scryptenc/scryptenc.c
+              autoreconf -i
+              ./configure CC=gcc CFLAGS='-O1 -g -fsanitize=undefined -fno-omit-frame-pointer' LDFLAGS='-fsanitize=undefined'
+              make -j2
+              git diff --exit-code
+            ) 2>&1 | tee "results/build-$rev.log"
+          done
+      - name: Execute actual application matrix and native scenario
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/mica-426/run.py sources results | tee results/replay.log
+      - name: Preserve complete evidence even on a failing assertion
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mica-426-header-validation
+          path: results/
+          retention-days: 14
