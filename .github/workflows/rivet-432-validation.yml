@@ -1,0 +1,65 @@
+name: RIVET scrypt 432 exact-source validation
+on:
+  push:
+    branches: [review/rivet-432-passphrase-validation-20260906]
+    paths:
+      - .github/workflows/rivet-432-validation.yml
+permissions: {}
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    env:
+      BASE: a71ae8281742ac638bc75baa4334f2292251e0eb
+      HEAD: 3fcb6826f01157682038036fcea2620b3509a12c
+    steps:
+      - name: Retrieve pinned public sources without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q source
+          git -C source remote add origin https://github.com/woahwhattheheck/scrypt.git
+          git -C source fetch --no-tags --depth=1 origin "$GITHUB_SHA" "$BASE" "$HEAD"
+          git -C source checkout -q --detach "$GITHUB_SHA"
+          git -C source worktree add --detach "$RUNNER_TEMP/rivet-432-base" "$BASE"
+          git -C source worktree add --detach "$RUNNER_TEMP/rivet-432-head" "$HEAD"
+          mkdir -p evidence/build
+          printf 'validation=%s\nbase=%s\nhead=%s\n' "$GITHUB_SHA" "$BASE" "$HEAD" | tee evidence/revisions.txt
+      - name: Install build dependencies and record versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq > evidence/build/apt-update.log 2>&1 || { tail -60 evidence/build/apt-update.log; exit 1; }
+          sudo apt-get install -y -qq autoconf automake autoconf-archive libtool libssl-dev > evidence/build/apt-install.log 2>&1 || { tail -60 evidence/build/apt-install.log; exit 1; }
+          { uname -a; cc --version; make --version; openssl version; python3 --version; } | tee evidence/environment.txt
+      - name: Sanitized reader matrix using pinned Git objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 source/tests/rivet-432/run.py --repo source --output evidence/reader | tee evidence/reader-console.log
+      - name: Build both complete scrypt applications
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence="$GITHUB_WORKSPACE/evidence/build"
+          for version in base head; do
+            cd "$RUNNER_TEMP/rivet-432-$version"
+            autoreconf -i > "$evidence/$version-autoreconf.log" 2>&1 || { tail -100 "$evidence/$version-autoreconf.log"; exit 1; }
+            ./configure > "$evidence/$version-configure.log" 2>&1 || { tail -100 "$evidence/$version-configure.log"; exit 1; }
+            make -j2 > "$evidence/$version-make.log" 2>&1 || { tail -100 "$evidence/$version-make.log"; exit 1; }
+            printf 'BUILD PASS: %s %s\n' "$version" "$(git rev-parse HEAD)"
+            test -x ./scrypt
+          done
+      - name: Run exact submitted native regression on both binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 source/tests/rivet-432/native.py --base "$RUNNER_TEMP/rivet-432-base" --head "$RUNNER_TEMP/rivet-432-head" --output evidence/native | tee evidence/native-console.log
+      - name: Retain validation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rivet-432-validation
+          path: evidence/
+          retention-days: 14
+          if-no-files-found: error
