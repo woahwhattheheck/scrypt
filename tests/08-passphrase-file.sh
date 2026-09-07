@@ -15,7 +15,7 @@ cr_passphrase_file="${s_basename}-passphrase-cr.txt"
 decrypted_cr_file="${s_basename}-decrypt-cr.txt"
 decrypted_cr_log="${s_basename}-decrypt-cr.log"
 crlf_passphrase_file="${s_basename}-passphrase-crlf.txt"
-decrypted_crlf_file="${s_basename}-passphrase-crlf.txt"
+decrypted_crlf_file="${s_basename}-decrypt-crlf.txt"
 
 scenario_cmd() {
 	# Create the passphrase file.
