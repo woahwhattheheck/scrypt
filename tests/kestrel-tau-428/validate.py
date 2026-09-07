@@ -13,10 +13,10 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
-import time
 
 BASE = "a71ae8281742ac638bc75baa4334f2292251e0eb"
 HEAD = "30ac68db8070705e07e5cd376fa155a9443be8ba"
@@ -211,12 +211,23 @@ def native(base: Path, head: Path, results: Path) -> list[dict]:
     rows = []
     for label, root in (("base", base), ("head", head)):
         env = dict(os.environ, N="12", VERBOSE="1", USE_VALGRIND="0")
-        p = run(["sh", str(head / "tests/test_scrypt.sh"), str(root / "scrypt")], env=env, cwd=root)
+        p = run(["sh", "-x", str(head / "tests/test_scrypt.sh"), str(root / "scrypt")], env=env, cwd=root)
         (results / f"native-{label}.log").write_bytes(p.stdout + p.stderr)
         checks = []
         for path in sorted((root / "tests-output").glob("*.exit")):
             description = path.with_suffix(".desc").read_text().strip()
             checks.append({"description": description, "status": path.read_text().strip()})
+        # Upstream removes successful .exit/.desc files. Read its own shell
+        # trace in that case instead of mistaking successful cleanup for no tests.
+        if not checks:
+            statuses = re.findall(r"^\+\s+_check_ret=(-?\d+)\s*$",
+                                  p.stderr.decode(), flags=re.MULTILINE)
+            descriptions = re.findall(r'^\s*setup_check "([^"]+)"',
+                                      source.read_text(), flags=re.MULTILINE)
+            require(len(statuses) == len(descriptions) == 7,
+                    f"{label}: incomplete native check trace: {statuses!r}")
+            checks = [{"description": desc, "status": status}
+                      for desc, status in zip(descriptions, statuses)]
         require(len(checks) == 7, f"{label} native check count: {checks!r}, {p.stderr!r}")
         passing = sum(c["status"] == "0" for c in checks)
         require((p.returncode == 0 and passing == 7) if label == "head"
@@ -230,6 +241,8 @@ def native(base: Path, head: Path, results: Path) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--native-only", action="store_true",
+                        help="Do not repeat the separately recorded static matrix")
     parser.add_argument("base", type=Path)
     parser.add_argument("head", type=Path)
     parser.add_argument("results", type=Path)
@@ -242,24 +255,28 @@ def main() -> None:
         require((root / "scrypt").is_file(), f"build missing: {root}")
     summary = {"base_sha": BASE, "head_sha": HEAD, "platform": platform.platform(),
                "python": platform.python_version(), "matrix": [], "native": []}
-    with tempfile.TemporaryDirectory(prefix="kestrel-tau-428-") as tmp:
-        directory = Path(tmp)
-        password = directory / "password"
-        password.write_bytes(PASSWORD)
-        fixtures = {}
-        for length in (0, 257, 65537):
-            plain = bytes((i * 17 + 13) % 256 for i in range(length))
-            src = directory / f"fixture-{length}"
-            src.write_bytes(plain)
-            p = run(command(head / "scrypt", "enc", password, str(src), None))
-            require(p.returncode == 0, f"fixture failed: {p.stderr!r}")
-            fixtures[length] = (plain, p.stdout)
-        for label, root in (("base", base), ("head", head)):
-            work = directory / label
-            work.mkdir()
-            summary["matrix"] += matrix(root, label, password, work, fixtures)
+    if not args.native_only:
+        with tempfile.TemporaryDirectory(prefix="kestrel-tau-428-") as tmp:
+            directory = Path(tmp)
+            password = directory / "password"
+            password.write_bytes(PASSWORD)
+            fixtures = {}
+            for length in (0, 257, 65537):
+                plain = bytes((i * 17 + 13) % 256 for i in range(length))
+                src = directory / f"fixture-{length}"
+                src.write_bytes(plain)
+                p = run(command(head / "scrypt", "enc", password, str(src), None))
+                require(p.returncode == 0, f"fixture failed: {p.stderr!r}")
+                fixtures[length] = (plain, p.stdout)
+            for label, root in (("base", base), ("head", head)):
+                work = directory / label
+                work.mkdir()
+                summary["matrix"] += matrix(root, label, password, work, fixtures)
+    if not args.native_only:
+        (results / "matrix-report.json").write_text(json.dumps(summary, indent=2) + "\n")
     summary["native"] = native(base, head, results)
     summary["status"] = "PASS"
+    summary["native_only"] = args.native_only
     summary["matrix_outcomes"] = len(summary["matrix"])
     summary["native_check_outcomes"] = sum(r["total"] for r in summary["native"])
     (results / "report.json").write_text(json.dumps(summary, indent=2) + "\n")

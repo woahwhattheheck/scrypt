@@ -14,6 +14,9 @@ jobs:
   exact-source-validation:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Check out replay harness
         uses: actions/checkout@v4
@@ -36,15 +39,17 @@ jobs:
           persist-credentials: false
       - name: Install build prerequisites
         run: |
+          set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq build-essential autoconf automake libtool autoconf-archive libssl-dev pkg-config
       - name: Build both unmodified revisions
         run: |
+          set -euo pipefail
           mkdir -p evidence
           { uname -a; gcc --version; getconf GNU_LIBC_VERSION; python3 --version; } | tee evidence/environment.txt
           for revision in base head; do
             (
-              set -e
+              set -euo pipefail
               cd "$revision"
               echo "BUILD $revision $(git rev-parse HEAD)"
               test "$(git hash-object main.c)" = "$(git rev-parse HEAD:main.c)"
@@ -55,9 +60,20 @@ jobs:
               test "$(git hash-object main.c)" = "$(git rev-parse HEAD:main.c)"
             ) 2>&1 | tee "evidence/build-$revision.log"
           done
-      - name: Run static alias matrix and unchanged submitted scenario
+      - name: Prove a failing child is not hidden by tee
         run: |
-          python3 review/tests/kestrel-tau-428/validate.py base head evidence 2>&1 | tee evidence/replay.log
+          set -uo pipefail
+          set +e
+          python3 -c 'raise SystemExit(17)' 2>&1 | tee evidence/expected-failure.log
+          rc=$?
+          set -e
+          test "$rc" -eq 17
+          printf 'PASS: intentional child failure propagated as %s\n' "$rc" | tee evidence/pipeline-check.txt
+      - name: Run corrected native collector without repeating the static matrix
+        run: |
+          set -euo pipefail
+          python3 review/tests/kestrel-tau-428/validate.py --native-only base head evidence 2>&1 | tee evidence/replay.log
+          test -s evidence/report.json
       - name: Preserve complete evidence
         if: always()
         uses: actions/upload-artifact@v4
