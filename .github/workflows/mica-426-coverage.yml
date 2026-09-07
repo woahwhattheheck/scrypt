@@ -1,0 +1,58 @@
+name: MICA PR426 native coverage
+on:
+  push:
+    branches: [review/mica-426-header-validation-20260906]
+    paths:
+      - tests/mica-426-coverage/**
+      - .github/workflows/mica-426-coverage.yml
+  workflow_dispatch:
+permissions: {}
+jobs:
+  coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Fetch fixed public revisions without repository credentials
+        shell: bash
+        env:
+          REVIEW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/woahwhattheheck/scrypt.git
+          git fetch --no-tags --depth=1 origin "$REVIEW_SHA"
+          git checkout --detach FETCH_HEAD
+          git fetch --no-tags --depth=1 origin 294338c5853f039630bd1a5d6e0c87ccd4692fff 7a18e0ccb77e19271ceb4a5cba76a14ee5fd8d81
+          mkdir -p sources results
+          git worktree add --detach sources/head 294338c5853f039630bd1a5d6e0c87ccd4692fff
+      - name: Install prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq > results/install.log 2>&1
+          sudo apt-get install -y -qq autoconf-archive automake libtool libssl-dev >> results/install.log 2>&1
+      - name: Build normal optimized application
+        shell: bash
+        run: |
+          set -euo pipefail
+          { uname -a; gcc --version; make --version; openssl version; autoconf --version; } > results/toolchain.txt
+          (
+            set -euo pipefail
+            cd sources/head
+            autoreconf -i
+            ./configure CC=gcc CFLAGS='-O2 -g'
+            make -s -j2
+            git diff --exit-code
+          ) > results/build.log 2>&1 || { tail -60 results/build.log; exit 1; }
+      - name: Measure original and expanded native tests against controlled regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/mica-426-coverage/run.py sources/head results | tee results/replay.log
+      - name: Preserve test patch and complete evidence on either outcome
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: mica-426-native-coverage
+          path: results/
+          retention-days: 14
