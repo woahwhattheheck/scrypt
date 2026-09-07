@@ -1,0 +1,64 @@
+name: Kestrel-Tau scrypt 428 native mutation coverage
+
+on:
+  push:
+    branches: ['review/kestrel-tau-428-validation-20260906']
+    paths:
+      - 'review-tests/kestrel-tau-428/**'
+      - '.github/workflows/kestrel-tau-428-mutations.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  native-mutation-coverage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out test-only replay
+        uses: actions/checkout@v4
+        with:
+          path: review
+          persist-credentials: false
+      - name: Check out exact submitted source
+        uses: actions/checkout@v4
+        with:
+          repository: woahwhattheheck/scrypt
+          ref: 30ac68db8070705e07e5cd376fa155a9443be8ba
+          path: head
+          persist-credentials: false
+      - name: Install prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential autoconf automake libtool autoconf-archive libssl-dev pkg-config
+      - name: Build pinned submitted source
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          { uname -a; gcc --version; getconf GNU_LIBC_VERSION; python3 --version; } | tee evidence/environment.txt
+          (
+            cd head
+            test "$(git rev-parse HEAD)" = 30ac68db8070705e07e5cd376fa155a9443be8ba
+            test "$(git hash-object main.c)" = 150d7fcae1065a51b2ce5f68cc8b51bfff5a7cfe
+            autoreconf -fi
+            ./configure
+            make -j2
+          ) 2>&1 | tee evidence/exact-head-build.log
+      - name: Validate native extension against exact head and three mutants
+        run: |
+          set -euo pipefail
+          python3 review/review-tests/kestrel-tau-428/mutations.py head evidence 2>&1 | tee evidence/mutation-replay.log
+          test -s evidence/mutation-report.json
+          git -C head diff --exit-code -- main.c tests/12-same-file.sh
+      - name: Preserve raw results and proposed test-only patch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kestrel-tau-scrypt428-mutations-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
