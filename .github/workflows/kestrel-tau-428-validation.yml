@@ -1,0 +1,68 @@
+name: Kestrel-Tau scrypt 428 validation
+
+on:
+  push:
+    branches: ['review/kestrel-tau-428-validation-20260906']
+    paths:
+      - 'tests/kestrel-tau-428/**'
+      - '.github/workflows/kestrel-tau-428-validation.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  exact-source-validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out replay harness
+        uses: actions/checkout@v4
+        with:
+          path: review
+          persist-credentials: false
+      - name: Check out exact baseline
+        uses: actions/checkout@v4
+        with:
+          repository: Tarsnap/scrypt
+          ref: a71ae8281742ac638bc75baa4334f2292251e0eb
+          path: base
+          persist-credentials: false
+      - name: Check out exact submitted head
+        uses: actions/checkout@v4
+        with:
+          repository: woahwhattheheck/scrypt
+          ref: 30ac68db8070705e07e5cd376fa155a9443be8ba
+          path: head
+          persist-credentials: false
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential autoconf automake libtool autoconf-archive libssl-dev pkg-config
+      - name: Build both unmodified revisions
+        run: |
+          mkdir -p evidence
+          { uname -a; gcc --version; getconf GNU_LIBC_VERSION; python3 --version; } | tee evidence/environment.txt
+          for revision in base head; do
+            (
+              set -e
+              cd "$revision"
+              echo "BUILD $revision $(git rev-parse HEAD)"
+              test "$(git hash-object main.c)" = "$(git rev-parse HEAD:main.c)"
+              echo "main.c blob $(git hash-object main.c)"
+              autoreconf -fi
+              ./configure
+              make -j2
+              test "$(git hash-object main.c)" = "$(git rev-parse HEAD:main.c)"
+            ) 2>&1 | tee "evidence/build-$revision.log"
+          done
+      - name: Run static alias matrix and unchanged submitted scenario
+        run: |
+          python3 review/tests/kestrel-tau-428/validate.py base head evidence 2>&1 | tee evidence/replay.log
+      - name: Preserve complete evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kestrel-tau-scrypt428-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
