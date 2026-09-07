@@ -10,11 +10,12 @@ decrypted_reference_file="${s_basename}-attempt_reference.txt"
 decrypted_badpass_file="${s_basename}-decrypt-badpass.txt"
 decrypted_badpass_log="${s_basename}-decrypt-badpass.log"
 decrypted_no_file_log="${s_basename}-decrypt-no-file.log"
+decrypted_no_file="${s_basename}-decrypt-no-file.txt"
 cr_passphrase_file="${s_basename}-passphrase-cr.txt"
 decrypted_cr_file="${s_basename}-decrypt-cr.txt"
 decrypted_cr_log="${s_basename}-decrypt-cr.log"
 crlf_passphrase_file="${s_basename}-passphrase-crlf.txt"
-decrypted_crlf_file="${s_basename}-decrypt-crlf.txt"
+decrypted_crlf_file="${s_basename}-passphrase-crlf.txt"
 
 scenario_cmd() {
 	# Create the passphrase file.
@@ -37,7 +38,7 @@ scenario_cmd() {
 	setup_check "scrypt dec file none"
 	${c_valgrind_cmd} "${bindir}/scrypt"				\
 	    dec --passphrase file:THIS_FILE_DOES_NOT_EXIST		\
-	    "${encrypted_reference_file}" "${decrypted_reference_file}"	\
+	    "${encrypted_reference_file}" "${decrypted_no_file}"		\
 	    2> "${decrypted_no_file_log}"
 	expected_exitcode 1 $? > "${c_exitfile}"
 
@@ -49,7 +50,7 @@ scenario_cmd() {
 
 	# We should not have created a file.
 	setup_check "scrypt dec file none no file"
-	test -e "${decrypted_badpass_file}"
+	test -e "${decrypted_no_file}"
 	expected_exitcode 1 $? > "${c_exitfile}"
 
 	# Attempt to decrypt the reference file with an incorrect passphrase.
@@ -58,7 +59,7 @@ scenario_cmd() {
 	echo "bad-pass" > "${bad_passphrase_file}"
 	${c_valgrind_cmd} "${bindir}/scrypt"				\
 	    dec --passphrase file:"${bad_passphrase_file}"		\
-	    "${encrypted_reference_file}" "${decrypted_reference_file}"	\
+	    "${encrypted_reference_file}" "${decrypted_badpass_file}"		\
 	    2> "${decrypted_badpass_log}"
 	expected_exitcode 1 $? > "${c_exitfile}"
 
