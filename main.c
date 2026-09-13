@@ -130,8 +130,8 @@ scrypt_mode_enc_dec(struct scryptenc_params params,
 		infile = stdin;
 	}
 
-	/* Do not truncate a named input through the output path or an alias. */
-	if ((infile != stdin) && (outfilename != NULL)) {
+	/* Do not truncate an input through the output path or an alias. */
+	if (outfilename != NULL) {
 		struct stat stat_in;
 		struct stat stat_out;
 
@@ -316,7 +316,7 @@ main(int argc, char * argv[])
 			break;
 		GETOPT_OPTARG("-t"):
 			if (PARSENUM(&params.maxtime, optarg, 0, INFINITY)) {
-				warnp("Invalid option: -t %s", optarg);
+				warnp("Invalid option: -t %s", ch, optarg);
 				exit(1);
 			}
 			break;
