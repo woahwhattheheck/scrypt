@@ -95,11 +95,11 @@ _Pragma("clang diagnostic pop")
 				    " float with base != 0"), 1)) :	\
 		(((*(x)) = -1) > 0) ?					\
 			((*(x)) = parsenum_unsigned((s), 0, (*(x)),	\
-			    (*(x)), (base), (trailing))) :	\
+			    (*(x)), (base), (trailing))) :		\
 			(ASSERT_FAIL(_define_name " applied to signed"	\
 			    " integer without specified bounds"), 1),	\
 		errno != 0						\
-		PARSENUM_EPILOGUE						\
+		PARSENUM_EPILOGUE					\
 	)
 #define PARSENUM_EX6(x, s, min, max, base, trailing, _define_name)	\
 	(								\
@@ -126,7 +126,7 @@ _Pragma("clang diagnostic pop")
 					(errno = ERANGE) :		\
 					0 : 0)),			\
 		errno != 0						\
-		PARSENUM_EPILOGUE						\
+		PARSENUM_EPILOGUE					\
 	)
 
 /* Magic to select which version of PARSENUM_EX to use. */
