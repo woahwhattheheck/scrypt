@@ -25,7 +25,7 @@ crypto_scrypt_files=							\
 	libcperciva/alg/sha256_shani.h					\
 	libcperciva/alg/sha256_sse2.h					\
 	libcperciva/cpusupport/cpusupport.h				\
-	libcperciva/util/insecure_memzero.c				\
+	libcperciva/util/insecure_memzero.c					\
 	libcperciva/util/insecure_memzero.h				\
 	libcperciva/util/warnp.c					\
 	libcperciva/util/warnp.h
@@ -49,7 +49,7 @@ scrypt_SOURCES=								\
 	libcperciva/crypto/crypto_aes_arm.h				\
 	libcperciva/crypto/crypto_aes_arm_u8.h				\
 	libcperciva/crypto/crypto_aesctr.c				\
-	libcperciva/crypto/crypto_aesctr.h					\
+	libcperciva/crypto/crypto_aesctr.h				\
 	libcperciva/crypto/crypto_aesctr_aesni.h			\
 	libcperciva/crypto/crypto_aesctr_arm.h				\
 	libcperciva/crypto/crypto_entropy.c				\
@@ -283,7 +283,7 @@ EXTRA_DIST=								\
 	libcperciva/POSIX/posix-restrict.c				\
 	libcperciva/POSIX/posix-stat-st_mtim.c				\
 	libcperciva/POSIX/posix-trivial.c				\
-	libcperciva/apisupport/Build/apisupport-LIBCRYPTO-LOW_LEVEL_AES.c\
+	libcperciva/apisupport/Build/apisupport-LIBCRYPTO_LOW_LEVEL_AES.c\
 	libcperciva/apisupport/Build/apisupport-NONPOSIX-MEMLIMIT.c	\
 	libcperciva/apisupport/Build/apisupport.sh			\
 	libcperciva/cpusupport/Build/cpusupport-ARM-AES.c		\
