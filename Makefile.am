@@ -49,7 +49,7 @@ scrypt_SOURCES=								\
 	libcperciva/crypto/crypto_aes_arm.h				\
 	libcperciva/crypto/crypto_aes_arm_u8.h				\
 	libcperciva/crypto/crypto_aesctr.c				\
-	libcperciva/crypto/crypto_aesctr.h				\
+	libcperciva/crypto/crypto_aesctr.h					\
 	libcperciva/crypto/crypto_aesctr_aesni.h			\
 	libcperciva/crypto/crypto_aesctr_arm.h				\
 	libcperciva/crypto/crypto_entropy.c				\
@@ -226,7 +226,7 @@ tests_check_params_check_params_normal_SOURCES=				\
 	$(crypto_scrypt_files)
 tests_check_params_check_params_normal_LDADD=				\
 	libcperciva_arm_sha256.la					\
-	libcperciva_cpusupport_detect.la					\
+	libcperciva_cpusupport_detect.la				\
 	libcperciva_shani.la						\
 	libscrypt_sse2.la						\
 	${LDADD_POSIX}
@@ -327,7 +327,7 @@ tests_verify_strings_test_scrypt_SOURCES=				\
 
 tests_verify_strings_test_scrypt_LDADD=					\
 	libcperciva_arm_sha256.la					\
-	libcperciva_cpusupport_detect.la					\
+	libcperciva_cpusupport_detect.la				\
 	libcperciva_shani.la						\
 	libscrypt_sse2.la						\
 	${LDADD_POSIX}
