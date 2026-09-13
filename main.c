@@ -225,8 +225,19 @@ cleanup:
 	/* Close any files we opened. */
 	if ((infile != stdin) && fclose(infile))
 		warnp("fclose");
-	if ((outfile != stdout) && fclose(outfile))
-		warnp("fclose");
+	if (outfile != stdout) {
+		if (fclose(outfile)) {
+			if (rc == SCRYPT_OK)
+				rc = SCRYPT_EWRFILE;
+			else
+				warnp("fclose");
+		}
+	} else if ((outfilename == NULL) && fflush(outfile)) {
+		if (rc == SCRYPT_OK)
+			rc = SCRYPT_EWRFILE;
+		else
+			warnp("fflush");
+	}
 
 	/* If we failed, print the right error message and exit. */
 	if (rc != SCRYPT_OK) {
