@@ -411,7 +411,7 @@ main(int argc, char * argv[])
 			break;
 		GETOPT_OPTARG("-t"):
 			if (PARSENUM(&params.maxtime, optarg, 0, INFINITY)) {
-				warnp("Invalid option: -t %s", ch, optarg);
+				warnp("Invalid option: -t %s", optarg);
 				exit(1);
 			}
 			break;
