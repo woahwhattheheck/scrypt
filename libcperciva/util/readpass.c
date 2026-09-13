@@ -54,6 +54,47 @@ resetsigs(struct sigaction savedsa[NSIGS])
 	}
 }
 
+/*
+ * Read one password line while preserving fgets(3)'s 2047-byte cap.  Unlike
+ * the C string interfaces below, fgetc(3) lets us distinguish an input NUL
+ * byte from the NUL terminator we append ourselves.
+ */
+static int
+readpass_readline(char * buf, size_t buflen, FILE * f)
+{
+	size_t len;
+	int ch;
+
+	for (len = 0; len < buflen - 1; len++) {
+		if ((ch = fgetc(f)) == EOF) {
+			if (ferror(f)) {
+				warnp("Cannot read password");
+				return (-1);
+			}
+			if (len == 0) {
+				warn0("EOF reading password");
+				return (-1);
+			}
+			break;
+		}
+
+		/* A returned C string cannot represent an embedded NUL. */
+		if (ch == '\0') {
+			warn0("NUL byte in password");
+			return (-1);
+		}
+
+		buf[len] = (char)ch;
+		if (ch == '\n') {
+			len++;
+			break;
+		}
+	}
+	buf[len] = '\0';
+
+	return (0);
+}
+
 /**
  * readpass(passwd, prompt, confirmprompt, devtty):
  * If ${devtty} is 0, read a password from stdin.  If ${devtty} is 1, read a
@@ -136,25 +177,15 @@ retry:
 		fprintf(stderr, "%s: ", prompt);
 
 	/* Read the password. */
-	if (fgets(passbuf, MAXPASSLEN, readfrom) == NULL) {
-		if (feof(readfrom))
-			warn0("EOF reading password");
-		else
-			warnp("Cannot read password");
+	if (readpass_readline(passbuf, MAXPASSLEN, readfrom))
 		goto err3;
-	}
 
 	/* Confirm the password if necessary. */
 	if (confirmprompt != NULL) {
 		if (usingtty)
 			fprintf(stderr, "%s: ", confirmprompt);
-		if (fgets(confpassbuf, MAXPASSLEN, readfrom) == NULL) {
-			if (feof(readfrom))
-				warn0("EOF reading password");
-			else
-				warnp("Cannot read password");
+		if (readpass_readline(confpassbuf, MAXPASSLEN, readfrom))
 			goto err3;
-		}
 		if (strcmp(passbuf, confpassbuf)) {
 			fprintf(stderr,
 			    "Passwords mismatch, please try again\n");
