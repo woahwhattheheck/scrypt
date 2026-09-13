@@ -309,6 +309,7 @@ EXTRA_DIST=								\
 	tests/08-passphrase-file.sh					\
 	tests/09-explicit-params.sh					\
 	tests/10-check-params.sh					\
+	tests/11-info.sh						\
 	tests/12-same-file.sh						\
 	tests/13-write-error.sh						\
 	tests/shared_test_functions.sh					\
@@ -316,6 +317,7 @@ EXTRA_DIST=								\
 	tests/test_scrypt.sh						\
 	tests/verify-strings/test_scrypt.good				\
 	tests/verify-strings/test_scrypt_good.enc			\
+	tests/verify-strings/test_scrypt_bad_logN.enc			\
 	tests/verify-strings/test_scrypt_small.good
 
 # Binary to test the crypto_scrypt() function.
