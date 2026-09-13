@@ -651,6 +651,7 @@ scryptenc_file(FILE * infile, FILE * outfile,
 		HMAC_SHA256_Update(&hctx, buf, readlen);
 		if (fwrite(buf, 1, readlen, outfile) < readlen) {
 			crypto_aesctr_free(AES);
+			crypto_aes_key_free(key_enc_exp);
 			rc = SCRYPT_EWRFILE;
 			goto err1;
 		}
@@ -869,6 +870,7 @@ scryptdec_file_copy(struct scryptdec_file_cookie * C, FILE * outfile)
 		crypto_aesctr_stream(AES, buf, buf, buflen - 32);
 		if (fwrite(buf, 1, buflen - 32, outfile) < buflen - 32) {
 			crypto_aesctr_free(AES);
+			crypto_aes_key_free(key_enc_exp);
 			rc = SCRYPT_EWRFILE;
 			goto err0;
 		}
