@@ -50,8 +50,8 @@
  * maxmemfrac - maximum fraction of available storage to use for the V array,
  *     where "available storage" is defined as the minimum out of the
  *     RLIMIT_AS, RLIMIT_DATA. and RLIMIT_RSS resource limits (if any are
- *     set).  This value will never cause a limit of less than 1 MiB to
- *     be enforced.
+ *     set).  This value will never cause a limit of less than 1 MiB to be
+ *     enforced.
  * maxtime - maximum amount of CPU time to spend computing the derived keys,
  *     in seconds.  This limit is only approximately enforced; the CPU
  *     performance is estimated and parameter limits are chosen accordingly.
@@ -89,6 +89,7 @@ struct scryptenc_params {
 #define SCRYPT_ERDFILE	13	/* error reading input file */
 #define SCRYPT_EPARAM	14	/* error in explicit parameters */
 #define SCRYPT_EBIGSLOW 15	/* both SCRYPT_ETOOBIG and SCRYPT_ETOOSLOW */
+#define SCRYPT_ETMPFILE 16	/* error buffering encrypted input */
 
 /* Opaque structure. */
 struct scryptdec_file_cookie;
@@ -141,11 +142,12 @@ int scryptdec_file_printparams(FILE *);
 
 /**
  * scryptdec_file(infile, outfile, passwd, passwdlen, params, verbose, force):
- * Read a stream from ${infile} and decrypt it, writing the resulting stream
- * to ${outfile}.  If ${force} is 1, do not check whether decryption
- * will exceed the estimated available memory or time.  The explicit
- * parameters within ${params} must be zero.  Return the explicit parameters
- * used via ${params}.
+ * Read and authenticate a stream from ${infile}, then decrypt it and write the
+ * resulting stream to ${outfile}.  No plaintext is written until the complete
+ * encrypted stream has passed authentication.  If ${force} is 1, do not check
+ * whether decryption will exceed the estimated available memory or time.  The
+ * explicit parameters within ${params} must be zero.  Return the explicit
+ * parameters used via ${params}.
  */
 int scryptdec_file(FILE *, FILE *, const uint8_t *, size_t,
     struct scryptenc_params *, int, int);
@@ -153,28 +155,29 @@ int scryptdec_file(FILE *, FILE *, const uint8_t *, size_t,
 /**
  * scryptdec_file_prep(infile, passwd, passwdlen, params, verbose, force,
  *     cookie):
- * Prepare to decrypt ${infile}, including checking the passphrase.  Allocate
- * a cookie at ${cookie}.  After calling this function, ${infile} should not
- * be modified until the decryption is completed by scryptdec_file_copy().
- * If ${force} is 1, do not check whether decryption will exceed the estimated
- * available memory or time.  The explicit parameters within ${params} must be
- * zero.  Return the explicit parameters to be used via ${params}.
+ * Prepare to decrypt ${infile}, including checking the passphrase and
+ * authenticating the complete encrypted stream.  Authenticated ciphertext is
+ * buffered in a temporary file owned by the returned ${cookie}; plaintext is
+ * not released by this function.  After it returns successfully, ${infile}
+ * may be modified or closed.  If ${force} is 1, do not check whether
+ * decryption will exceed the estimated available memory or time.  The
+ * explicit parameters within ${params} must be zero.  Return the explicit
+ * parameters to be used via ${params}.
  */
 int scryptdec_file_prep(FILE *, const uint8_t *, size_t,
     struct scryptenc_params *, int, int, struct scryptdec_file_cookie **);
 
 /**
  * scryptdec_file_copy(cookie, outfile):
- * Read a stream from the file that was passed into the ${cookie} by
- * scryptdec_file_prep(), decrypt it, and write the resulting stream to
- * ${outfile}.  After this function completes, it is safe to modify/close
- * ${outfile} and the ${infile} which was given to scryptdec_file_prep().
+ * Decrypt the authenticated ciphertext buffered in ${cookie} and write the
+ * resulting stream to ${outfile}.  The same cookie may be copied again; each
+ * call starts at the beginning of the authenticated ciphertext spool.
  */
 int scryptdec_file_copy(struct scryptdec_file_cookie *, FILE *);
 
 /**
  * scryptdec_file_cookie_free(cookie):
- * Free the ${cookie}.
+ * Free the ${cookie}, including its authenticated ciphertext spool.
  */
 void scryptdec_file_cookie_free(struct scryptdec_file_cookie *);
 

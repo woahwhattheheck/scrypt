@@ -63,6 +63,7 @@ static int scryptdec_file_load_header(FILE *, uint8_t[static 96]);
 
 struct scryptdec_file_cookie {
 	FILE *	infile;		/* This is not owned by this cookie. */
+	FILE *	authenticated;	/* Authenticated ciphertext; owned by cookie. */
 	uint8_t	header[96];
 	uint8_t	dk[64];
 };
@@ -752,6 +753,10 @@ scryptdec_file_cookie_free(struct scryptdec_file_cookie * C)
 	if (C == NULL)
 		return;
 
+	/* Close and remove the authenticated ciphertext spool. */
+	if (C->authenticated != NULL)
+		(void)fclose(C->authenticated);
+
 	/* Zero sensitive data. */
 	insecure_memzero(C->dk, 64);
 
@@ -816,12 +821,9 @@ err0:
 /**
  * scryptdec_file_prep(infile, passwd, passwdlen, params, verbose, force,
  *     cookie):
- * Prepare to decrypt ${infile}, including checking the passphrase.  Allocate
- * a cookie at ${cookie}.  After calling this function, ${infile} should not
- * be modified until the decryption is completed by scryptdec_file_copy().
- * If ${force} is 1, do not check whether decryption will exceed the estimated
- * available memory or time.  The explicit parameters within ${params} must be
- * zero.  Return the explicit parameters to be used via ${params}.
+ * Prepare to decrypt ${infile}, including checking the passphrase and the
+ * complete encrypted-stream authenticator.  Ciphertext is buffered until its
+ * final authenticator is verified so no plaintext is released early.
  */
 int
 scryptdec_file_prep(FILE * infile, const uint8_t * passwd,
@@ -829,6 +831,12 @@ scryptdec_file_prep(FILE * infile, const uint8_t * passwd,
     int verbose, int force, struct scryptdec_file_cookie ** cookie)
 {
 	struct scryptdec_file_cookie * C;
+	uint8_t buf[ENCBLOCK + 32];
+	uint8_t hbuf[32];
+	uint8_t * key_hmac;
+	size_t buflen = 0;
+	size_t readlen;
+	HMAC_SHA256_CTX hctx;
 	int rc;
 
 	/* The explicit parameters must be zero. */
@@ -838,6 +846,7 @@ scryptdec_file_prep(FILE * infile, const uint8_t * passwd,
 	if ((C = malloc(sizeof(struct scryptdec_file_cookie))) == NULL)
 		return (SCRYPT_ENOMEM);
 	C->infile = infile;
+	C->authenticated = NULL;
 
 	/* Load the header. */
 	if ((rc = scryptdec_file_load_header(infile, C->header)) != 0)
@@ -847,6 +856,63 @@ scryptdec_file_prep(FILE * infile, const uint8_t * passwd,
 	if ((rc = scryptdec_setup(C->header, C->dk, passwd, passwdlen,
 	    P, verbose, force)) != 0)
 		goto err1;
+
+	/* Create an anonymous spool for ciphertext, never plaintext. */
+	if ((C->authenticated = tmpfile()) == NULL) {
+		rc = SCRYPT_ETMPFILE;
+		goto err1;
+	}
+
+	/* Authenticate the header and encrypted payload before any decryption. */
+	key_hmac = &C->dk[32];
+	HMAC_SHA256_Init(&hctx, key_hmac, 32);
+	HMAC_SHA256_Update(&hctx, C->header, 96);
+
+	do {
+		/* Retain the final 32 bytes as the candidate authenticator. */
+		if ((readlen = fread(&buf[buflen], 1,
+		    ENCBLOCK + 32 - buflen, infile)) == 0)
+			break;
+		buflen += readlen;
+		if (buflen <= 32)
+			continue;
+
+		HMAC_SHA256_Update(&hctx, buf, buflen - 32);
+		if (fwrite(buf, 1, buflen - 32, C->authenticated) <
+		    buflen - 32) {
+			rc = SCRYPT_ETMPFILE;
+			goto err1;
+		}
+
+		memmove(buf, &buf[buflen - 32], 32);
+		buflen = 32;
+	} while (1);
+
+	/* Did we exit the loop due to a read error? */
+	if (ferror(infile)) {
+		rc = SCRYPT_ERDFILE;
+		goto err1;
+	}
+
+	/* Did we read enough data that we might have a valid authenticator? */
+	if (buflen < 32) {
+		rc = SCRYPT_EINVAL;
+		goto err1;
+	}
+
+	/* Verify the complete encrypted stream before releasing a cookie. */
+	HMAC_SHA256_Final(hbuf, &hctx);
+	if (crypto_verify_bytes(hbuf, buf, 32)) {
+		rc = SCRYPT_EINVAL;
+		goto err1;
+	}
+
+	/* Rewind the authenticated ciphertext spool for copying/decryption. */
+	if (fseek(C->authenticated, 0, SEEK_SET)) {
+		rc = SCRYPT_ETMPFILE;
+		goto err1;
+	}
+	clearerr(C->authenticated);
 
 	/* Set cookie for calling function. */
 	*cookie = C;
@@ -863,42 +929,32 @@ err1:
 
 /**
  * scryptdec_file_copy(cookie, outfile):
- * Read a stream from the file that was passed into the ${cookie} by
- * scryptdec_file_prep(), decrypt it, and write the resulting stream to
- * ${outfile}.  After this function completes, it is safe to modify/close
- * ${outfile} and the ${infile} which was given to scryptdec_file_prep().
+ * Decrypt authenticated ciphertext buffered by scryptdec_file_prep() and
+ * write the resulting stream to ${outfile}.
  */
 int
 scryptdec_file_copy(struct scryptdec_file_cookie * C, FILE * outfile)
 {
-	uint8_t buf[ENCBLOCK + 32];
-	uint8_t hbuf[32];
+	uint8_t buf[ENCBLOCK];
 	uint8_t * key_enc;
-	uint8_t * key_hmac;
-	size_t buflen = 0;
 	size_t readlen;
-	HMAC_SHA256_CTX hctx;
 	struct crypto_aes_key * key_enc_exp;
 	struct crypto_aesctr * AES;
 	int rc;
 
-	/* Sanity check. */
+	/* Sanity checks. */
 	assert(C != NULL);
+	assert(C->authenticated != NULL);
 
-	/* Use existing array for these pointers. */
+	/* Each copy starts at the beginning of the authenticated ciphertext. */
+	if (fseek(C->authenticated, 0, SEEK_SET)) {
+		rc = SCRYPT_ETMPFILE;
+		goto err0;
+	}
+	clearerr(C->authenticated);
+
+	/* Decrypt only after the complete encrypted stream has authenticated. */
 	key_enc = C->dk;
-	key_hmac = &C->dk[32];
-
-	/* Start hashing with the header. */
-	HMAC_SHA256_Init(&hctx, key_hmac, 32);
-	HMAC_SHA256_Update(&hctx, C->header, 96);
-
-	/*
-	 * We don't know how long the encrypted data block is (we can't know,
-	 * since data can be streamed into 'scrypt enc') so we need to read
-	 * data and decrypt all of it except the final 32 bytes, then check
-	 * if that final 32 bytes is the correct signature.
-	 */
 	if ((key_enc_exp = crypto_aes_key_expand(key_enc, 32)) == NULL) {
 		rc = SCRYPT_EOPENSSL;
 		goto err0;
@@ -908,51 +964,25 @@ scryptdec_file_copy(struct scryptdec_file_cookie * C, FILE * outfile)
 		rc = SCRYPT_ENOMEM;
 		goto err0;
 	}
-	do {
-		/* Read data until we have more than 32 bytes of it. */
-		if ((readlen = fread(&buf[buflen], 1,
-		    ENCBLOCK + 32 - buflen, C->infile)) == 0)
-			break;
-		buflen += readlen;
-		if (buflen <= 32)
-			continue;
 
-		/*
-		 * Decrypt, hash, and output everything except the last 32
-		 * bytes out of what we have in our buffer.
-		 */
-		HMAC_SHA256_Update(&hctx, buf, buflen - 32);
-		crypto_aesctr_stream(AES, buf, buf, buflen - 32);
-		if (fwrite(buf, 1, buflen - 32, outfile) < buflen - 32) {
+	do {
+		if ((readlen = fread(buf, 1, ENCBLOCK, C->authenticated)) == 0)
+			break;
+		crypto_aesctr_stream(AES, buf, buf, readlen);
+		if (fwrite(buf, 1, readlen, outfile) < readlen) {
 			crypto_aesctr_free(AES);
 			crypto_aes_key_free(key_enc_exp);
 			rc = SCRYPT_EWRFILE;
 			goto err0;
 		}
-
-		/* Move the last 32 bytes to the start of the buffer. */
-		memmove(buf, &buf[buflen - 32], 32);
-		buflen = 32;
 	} while (1);
+
 	crypto_aesctr_free(AES);
 	crypto_aes_key_free(key_enc_exp);
 
-	/* Did we exit the loop due to a read error? */
-	if (ferror(C->infile)) {
-		rc = SCRYPT_ERDFILE;
-		goto err0;
-	}
-
-	/* Did we read enough data that we *might* have a valid signature? */
-	if (buflen < 32) {
-		rc = SCRYPT_EINVAL;
-		goto err0;
-	}
-
-	/* Verify signature. */
-	HMAC_SHA256_Final(hbuf, &hctx);
-	if (crypto_verify_bytes(hbuf, buf, 32)) {
-		rc = SCRYPT_EINVAL;
+	/* Did we exit the loop due to a spool read error? */
+	if (ferror(C->authenticated)) {
+		rc = SCRYPT_ETMPFILE;
 		goto err0;
 	}
 
@@ -983,12 +1013,12 @@ scryptdec_file(FILE * infile, FILE * outfile, const uint8_t * passwd,
 	/* The explicit parameters must be zero. */
 	assert((P->logN == 0) && (P->r == 0) && (P->p == 0));
 
-	/* Check header, including passphrase. */
+	/* Authenticate the complete stream, including passphrase and payload. */
 	if ((rc = scryptdec_file_prep(infile, passwd, passwdlen, P,
 	    verbose, force, &C)) != 0)
 		goto err0;
 
-	/* Copy unencrypted data to outfile. */
+	/* Copy authenticated, unencrypted data to outfile. */
 	if ((rc = scryptdec_file_copy(C, outfile)) != 0)
 		goto err1;
 
