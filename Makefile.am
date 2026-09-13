@@ -25,8 +25,8 @@ crypto_scrypt_files=							\
 	libcperciva/alg/sha256_shani.h					\
 	libcperciva/alg/sha256_sse2.h					\
 	libcperciva/cpusupport/cpusupport.h				\
-	libcperciva/util/insecure_memzero.c				\
-	libcperciva/util/insecure_memzero.h				\
+	libcperciva/util/insecure_memzero.c					\
+	libcperciva/util/insecure_memzero.h					\
 	libcperciva/util/warnp.c					\
 	libcperciva/util/warnp.h
 
@@ -46,17 +46,17 @@ scrypt_SOURCES=								\
 	libcperciva/crypto/crypto_aes.h					\
 	libcperciva/crypto/crypto_aes_aesni.h				\
 	libcperciva/crypto/crypto_aes_aesni_m128i.h			\
-	libcperciva/crypto/crypto_aes_arm.h				\
+	libcperciva/crypto/crypto_aes_arm.h					\
 	libcperciva/crypto/crypto_aes_arm_u8.h				\
 	libcperciva/crypto/crypto_aesctr.c				\
 	libcperciva/crypto/crypto_aesctr.h				\
 	libcperciva/crypto/crypto_aesctr_aesni.h			\
 	libcperciva/crypto/crypto_aesctr_arm.h				\
-	libcperciva/crypto/crypto_entropy.c				\
-	libcperciva/crypto/crypto_entropy.h				\
+	libcperciva/crypto/crypto_entropy.c					\
+	libcperciva/crypto/crypto_entropy.h					\
 	libcperciva/crypto/crypto_entropy_rdrand.h			\
-	libcperciva/crypto/crypto_verify_bytes.c			\
-	libcperciva/crypto/crypto_verify_bytes.h			\
+	libcperciva/crypto/crypto_verify_bytes.c				\
+	libcperciva/crypto/crypto_verify_bytes.h				\
 	libcperciva/util/align_ptr.h					\
 	libcperciva/util/asprintf.c					\
 	libcperciva/util/asprintf.h					\
@@ -207,7 +207,7 @@ endif
 libscrypt_kdf_la_SOURCES=	$(crypto_scrypt_files)
 libscrypt_kdf_la_LIBADD=						\
 	libcperciva_arm_sha256.la					\
-	libcperciva_cpusupport_detect.la				\
+	libcperciva_cpusupport_detect.la					\
 	libcperciva_shani.la						\
 	libscrypt_sse2.la
 # Workaround for "created with both libtool and without".
@@ -226,7 +226,7 @@ tests_check_params_check_params_normal_SOURCES=				\
 	$(crypto_scrypt_files)
 tests_check_params_check_params_normal_LDADD=				\
 	libcperciva_arm_sha256.la					\
-	libcperciva_cpusupport_detect.la				\
+	libcperciva_cpusupport_detect.la					\
 	libcperciva_shani.la						\
 	libscrypt_sse2.la						\
 	${LDADD_POSIX}
@@ -280,7 +280,7 @@ EXTRA_DIST=								\
 	libcperciva/POSIX/posix-inet6-addrstrlen.c			\
 	libcperciva/POSIX/posix-l.sh					\
 	libcperciva/POSIX/posix-msg_nosignal.c				\
-	libcperciva/POSIX/posix-restrict.c				\
+	libcperciva/POSIX/posix-restrict.c					\
 	libcperciva/POSIX/posix-stat-st_mtim.c				\
 	libcperciva/POSIX/posix-trivial.c				\
 	libcperciva/apisupport/Build/apisupport-LIBCRYPTO-LOW_LEVEL_AES.c\
@@ -310,6 +310,7 @@ EXTRA_DIST=								\
 	tests/09-explicit-params.sh					\
 	tests/10-check-params.sh					\
 	tests/12-same-file.sh						\
+	tests/13-write-error.sh						\
 	tests/shared_test_functions.sh					\
 	tests/shared_valgrind_functions.sh				\
 	tests/test_scrypt.sh						\
@@ -324,7 +325,7 @@ tests_verify_strings_test_scrypt_SOURCES=				\
 
 tests_verify_strings_test_scrypt_LDADD=					\
 	libcperciva_arm_sha256.la					\
-	libcperciva_cpusupport_detect.la				\
+	libcperciva_cpusupport_detect.la					\
 	libcperciva_shani.la						\
 	libscrypt_sse2.la						\
 	${LDADD_POSIX}
