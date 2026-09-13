@@ -70,6 +70,9 @@ scryptenc_print_error(int rc, const char * infilename,
 	case SCRYPT_EPARAM:
 		warn0("Error in explicit parameters");
 		break;
+	case SCRYPT_ETMPFILE:
+		warnp("Error buffering encrypted input");
+		break;
 	default:
 		warn0("Programmer error: unrecognized scrypt error");
 		break;
