@@ -7,6 +7,7 @@ encrypted_file="${s_basename}-attempt.enc"
 decrypted_file="${s_basename}-attempt.txt"
 same_file="${s_basename}-same.txt"
 same_alias="${s_basename}-same-alias.txt"
+same_stdin="${s_basename}-same-stdin.txt"
 
 scenario_cmd() {
 	# Encrypt a file.  Use --passphrase dev:stdin-once instead of -P.
@@ -67,5 +68,22 @@ scenario_cmd() {
 	# The hard-linked input must also remain byte-for-byte intact.
 	setup_check "hard-linked output rejection preserves input"
 	cmp -s "${same_file}" "${reference_file}"
+	echo $? > "${c_exitfile}"
+
+	# Standard input can itself be a file descriptor for the named output.
+	# Keep the passphrase out of stdin so this hostile reaches the output open.
+	cp "${reference_file}" "${same_stdin}"
+	setup_check "scrypt enc rejects redirected stdin output alias"
+	(
+		SCRYPT_TEST_PASSWORD="${password}" \
+		    ${c_valgrind_cmd} "${bindir}/scrypt" \
+		    enc --passphrase env:SCRYPT_TEST_PASSWORD -t 1 \
+		    - "${same_stdin}" < "${same_stdin}"
+		expected_exitcode 1 $? > "${c_exitfile}"
+	)
+
+	# Rejecting the redirected-stdin alias must preserve the source bytes.
+	setup_check "redirected stdin output rejection preserves input"
+	cmp -s "${same_stdin}" "${reference_file}"
 	echo $? > "${c_exitfile}"
 }
