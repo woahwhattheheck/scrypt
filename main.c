@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "getopt.h"
 #include "humansize.h"
@@ -127,6 +128,20 @@ scrypt_mode_enc_dec(struct scryptenc_params params,
 		}
 	} else {
 		infile = stdin;
+	}
+
+	/* Do not truncate a named input through the output path or an alias. */
+	if ((infile != stdin) && (outfilename != NULL)) {
+		struct stat stat_in;
+		struct stat stat_out;
+
+		if ((fstat(fileno(infile), &stat_in) == 0) &&
+		    (stat(outfilename, &stat_out) == 0) &&
+		    (stat_in.st_dev == stat_out.st_dev) &&
+		    (stat_in.st_ino == stat_out.st_ino)) {
+			warn0("Input and output files are the same file");
+			goto err1;
+		}
 	}
 
 	/* Get the password. */
