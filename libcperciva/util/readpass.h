@@ -16,7 +16,8 @@
  * the user by printing ${prompt} to stderr.  If ${confirmprompt} is non-NULL,
  * read a second password (prompting if a terminal is being used) and repeat
  * until the user enters the same password twice.  Return the password as a
- * malloced NUL-terminated string via ${passwd}.
+ * malloced NUL-terminated string via ${passwd}.  Print an error and fail if
+ * the password is 2048 bytes or more, or contains an embedded NUL byte.
  */
 int readpass(char **, const char *, const char *, int);
 

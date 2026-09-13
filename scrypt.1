@@ -63,6 +63,16 @@ if specified, or the standard output otherwise.
 The user will be prompted to enter the passphrase used at
 encryption time to generate the derived encryption key.
 .Pp
+.Ar outfile
+cannot be the same file as
+.Ar infile :
+.Nm
+truncates
+.Ar outfile
+before it reads
+.Ar infile ,
+so it exits with an error instead of destroying the input.
+.Pp
 .Nm Cm info
 provides information about the encryption parameters used for
 .Ar infile .

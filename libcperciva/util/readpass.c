@@ -54,6 +54,82 @@ resetsigs(struct sigaction savedsa[NSIGS])
 	}
 }
 
+/*
+ * Read one password line.  fgetc(3) lets us distinguish input NUL bytes from
+ * the terminator we append ourselves and lets us verify that a full buffer is
+ * followed only by an end-of-line marker or EOF instead of silently using a
+ * truncated prefix.
+ */
+static int
+readpass_readline(char * buf, size_t buflen, FILE * f)
+{
+	size_t len;
+	int ch;
+	int next;
+
+	for (len = 0; len < buflen - 1; len++) {
+		if ((ch = fgetc(f)) == EOF) {
+			if (ferror(f)) {
+				warnp("Cannot read password");
+				return (-1);
+			}
+			if (len == 0) {
+				warn0("EOF reading password");
+				return (-1);
+			}
+			buf[len] = '\0';
+			return (0);
+		}
+
+		/* A returned C string cannot represent an embedded NUL. */
+		if (ch == '\0') {
+			warn0("NUL byte in password");
+			return (-1);
+		}
+
+		buf[len] = (char)ch;
+		if (ch == '\n') {
+			buf[len + 1] = '\0';
+			return (0);
+		}
+	}
+
+	/*
+	 * The buffer holds exactly MAXPASSLEN - 1 password bytes.  This is valid
+	 * only if the next input byte is a line terminator or EOF; otherwise the
+	 * old fgets(3)-style behaviour would silently ignore the remaining suffix.
+	 */
+	if ((ch = fgetc(f)) == EOF) {
+		if (ferror(f)) {
+			warnp("Cannot read password");
+			return (-1);
+		}
+		buf[len] = '\0';
+		return (0);
+	}
+	if (ch == '\n') {
+		buf[len] = '\0';
+		return (0);
+	}
+	if (ch == '\r') {
+		if ((next = fgetc(f)) == EOF) {
+			if (ferror(f)) {
+				warnp("Cannot read password");
+				return (-1);
+			}
+			buf[len] = '\0';
+			return (0);
+		}
+		if (next == '\n') {
+			buf[len] = '\0';
+			return (0);
+		}
+	}
+
+	warn0("Password is too long");
+	return (-1);
+}
+
 /**
  * readpass(passwd, prompt, confirmprompt, devtty):
  * If ${devtty} is 0, read a password from stdin.  If ${devtty} is 1, read a
@@ -63,7 +139,8 @@ resetsigs(struct sigaction savedsa[NSIGS])
  * the user by printing ${prompt} to stderr.  If ${confirmprompt} is non-NULL,
  * read a second password (prompting if a terminal is being used) and repeat
  * until the user enters the same password twice.  Return the password as a
- * malloced NUL-terminated string via ${passwd}.
+ * malloced NUL-terminated string via ${passwd}.  Print an error and fail if
+ * the password is 2048 bytes or more, or contains an embedded NUL byte.
  */
 int
 readpass(char ** passwd, const char * prompt,
@@ -136,25 +213,15 @@ retry:
 		fprintf(stderr, "%s: ", prompt);
 
 	/* Read the password. */
-	if (fgets(passbuf, MAXPASSLEN, readfrom) == NULL) {
-		if (feof(readfrom))
-			warn0("EOF reading password");
-		else
-			warnp("Cannot read password");
+	if (readpass_readline(passbuf, MAXPASSLEN, readfrom))
 		goto err3;
-	}
 
 	/* Confirm the password if necessary. */
 	if (confirmprompt != NULL) {
 		if (usingtty)
 			fprintf(stderr, "%s: ", confirmprompt);
-		if (fgets(confpassbuf, MAXPASSLEN, readfrom) == NULL) {
-			if (feof(readfrom))
-				warn0("EOF reading password");
-			else
-				warnp("Cannot read password");
+		if (readpass_readline(confpassbuf, MAXPASSLEN, readfrom))
 			goto err3;
-		}
 		if (strcmp(passbuf, confpassbuf)) {
 			fprintf(stderr,
 			    "Passwords mismatch, please try again\n");
