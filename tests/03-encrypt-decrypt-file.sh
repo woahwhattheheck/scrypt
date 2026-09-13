@@ -5,6 +5,8 @@ c_valgrind_min=1
 reference_file="${scriptdir}/verify-strings/test_scrypt.good"
 encrypted_file="${s_basename}-attempt.enc"
 decrypted_file="${s_basename}-attempt.txt"
+nul_output="${s_basename}-nul-passphrase.txt"
+nul_log="${s_basename}-nul-passphrase.log"
 same_file="${s_basename}-same.txt"
 same_alias="${s_basename}-same-alias.txt"
 
@@ -38,6 +40,27 @@ scenario_cmd() {
 	setup_check "scrypt enc decrypt output against reference"
 	cmp -s "${decrypted_file}" "${reference_file}"
 	echo $? > "${c_exitfile}"
+
+	# A passphrase read from stdin is returned as a C string.  Reject an
+	# embedded NUL rather than silently treating the following bytes as absent.
+	setup_check "scrypt dec rejects NUL in stdin passphrase"
+	(
+		printf 'hunter2\000extra\n' |				\
+		    ${c_valgrind_cmd} "${bindir}/scrypt" dec		\
+		    --passphrase dev:stdin-once "${encrypted_file}"	\
+		    "${nul_output}" 2> "${nul_log}"
+		expected_exitcode 1 $? > "${c_exitfile}"
+	)
+
+	# The rejection should identify the input problem directly.
+	setup_check "scrypt dec stdin NUL error"
+	grep -q "scrypt: NUL byte in password" "${nul_log}"
+	echo $? > "${c_exitfile}"
+
+	# Password rejection happens before the output is opened.
+	setup_check "scrypt dec stdin NUL no output"
+	test -e "${nul_output}"
+	expected_exitcode 1 $? > "${c_exitfile}"
 
 	# Refuse to overwrite a named input through the same pathname.
 	cp "${reference_file}" "${same_file}"
