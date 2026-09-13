@@ -29,11 +29,13 @@
 #include <sys/stat.h>
 
 #include <errno.h>
+#include <fcntl.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "getopt.h"
 #include "humansize.h"
@@ -131,6 +133,55 @@ same_file(FILE * infile, const char * outfilename)
 }
 
 /**
+ * open_output(infile, outfilename, outfile):
+ * Open ${outfilename} for writing without truncating it until the descriptor
+ * we actually opened has been proved to be different from ${infile}.  Return
+ * 1 if both descriptors identify the same regular file, -1 on error, and 0
+ * on success with ${outfile} set.
+ */
+static int
+open_output(FILE * infile, const char * outfilename, FILE ** outfile)
+{
+	struct stat sb_in;
+	struct stat sb_out;
+	int fd;
+	int saved_errno;
+
+	/* Do not truncate until we have compared the opened descriptor. */
+	if ((fd = open(outfilename, O_WRONLY | O_CREAT, 0666)) == -1)
+		return (-1);
+
+	/* Compare the actual objects behind both open descriptors. */
+	if (fstat(fileno(infile), &sb_in))
+		goto err0;
+	if (fstat(fd, &sb_out))
+		goto err0;
+	if (S_ISREG(sb_in.st_mode) && S_ISREG(sb_out.st_mode) &&
+	    (sb_in.st_dev == sb_out.st_dev) &&
+	    (sb_in.st_ino == sb_out.st_ino)) {
+		(void)close(fd);
+		return (1);
+	}
+
+	/* Match fopen(..., "wb") truncation for regular output files. */
+	if (S_ISREG(sb_out.st_mode) && ftruncate(fd, 0))
+		goto err0;
+
+	/* fdopen does not truncate an already-open descriptor. */
+	if ((*outfile = fdopen(fd, "wb")) == NULL)
+		goto err0;
+
+	/* Success! */
+	return (0);
+
+err0:
+	saved_errno = errno;
+	(void)close(fd);
+	errno = saved_errno;
+	return (-1);
+}
+
+/**
  * scrypt_mode_enc_dec(params, passphrase_entry, passphrase_arg, dec, verbose,
  *     force_resources, infilename, outfilename):
  * Either encrypt (if ${dec} is 0) or decrypt (if ${dec} is non-zero)
@@ -151,6 +202,7 @@ scrypt_mode_enc_dec(struct scryptenc_params params,
 	FILE * infile;
 	FILE * outfile = stdout;
 	char * passwd;
+	int openrc;
 	int rc;
 
 	/* If the input isn't stdin, open the file. */
@@ -164,10 +216,8 @@ scrypt_mode_enc_dec(struct scryptenc_params params,
 	}
 
 	/*
-	 * Refuse to write the output into the file we are reading.  Opening
-	 * it for writing truncates it, so we would destroy the data we were
-	 * asked to encrypt or decrypt and then "succeed" in writing an
-	 * encryption of nothing.
+	 * Refuse obvious same-file aliases before prompting.  open_output() repeats
+	 * this check on the descriptor it actually opens, closing the path race.
 	 */
 	if ((outfilename != NULL) && same_file(infile, outfilename)) {
 		warn0("Input and output files are the same: %s", outfilename);
@@ -199,10 +249,14 @@ scrypt_mode_enc_dec(struct scryptenc_params params,
 		}
 	}
 
-	/* If we have an output filename, open it. */
+	/* Bind the destructive same-file check to the output we actually opened. */
 	if (outfilename != NULL) {
-		if ((outfile = fopen(outfilename, "wb")) == NULL) {
-			warnp("Cannot open output file: %s", outfilename);
+		if ((openrc = open_output(infile, outfilename, &outfile)) != 0) {
+			if (openrc > 0)
+				warn0("Input and output files are the same: %s",
+				    outfilename);
+			else
+				warnp("Cannot open output file: %s", outfilename);
 			goto err2;
 		}
 	}
@@ -357,7 +411,7 @@ main(int argc, char * argv[])
 			break;
 		GETOPT_OPTARG("-t"):
 			if (PARSENUM(&params.maxtime, optarg, 0, INFINITY)) {
-				warnp("Invalid option: -t %s", optarg);
+				warnp("Invalid option: -t %s", ch, optarg);
 				exit(1);
 			}
 			break;
