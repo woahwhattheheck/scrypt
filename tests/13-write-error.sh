@@ -5,8 +5,11 @@ c_valgrind_min=1
 reference_file="${scriptdir}/verify-strings/test_scrypt.good"
 large_file="${s_basename}-large.txt"
 large_enc="${s_basename}-large.enc"
+small_file="${s_basename}-small.txt"
 stderr_enc="${s_basename}-enc.stderr"
 stderr_dec="${s_basename}-dec.stderr"
+stderr_close="${s_basename}-close.stderr"
+stderr_flush="${s_basename}-flush.stderr"
 
 # Explicit parameters keep the key derivation cheap, and -f skips the
 # resource checks, which would otherwise measure the CPU speed every time.
@@ -60,5 +63,35 @@ scenario_cmd() {
 
 	setup_check "scrypt dec write error message"
 	grep -q "scrypt: Error writing file: /dev/full" "${stderr_dec}"
+	echo $? > "${c_exitfile}"
+
+	# Keep this output small enough that stdio can buffer it until finalization.
+	# The error must still change the command's exit status when it appears only
+	# during fclose(3) or fflush(3).
+	printf "x" > "${small_file}"
+
+	setup_check "scrypt enc named output close failure"
+	(
+		echo "${password}" | ${c_valgrind_cmd} "${bindir}/scrypt" \
+		    enc ${fast_params} --passphrase dev:stdin-once	\
+		    "${small_file}" /dev/full				\
+		    2> "${stderr_close}"
+		expected_exitcode 1 $? > "${c_exitfile}"
+	)
+
+	setup_check "scrypt enc named output close error"
+	grep -q "scrypt: Error writing file: /dev/full" "${stderr_close}"
+	echo $? > "${c_exitfile}"
+
+	setup_check "scrypt enc stdout flush failure"
+	(
+		echo "${password}" | ${c_valgrind_cmd} "${bindir}/scrypt" \
+		    enc ${fast_params} --passphrase dev:stdin-once	\
+		    "${small_file}" > /dev/full 2> "${stderr_flush}"
+		expected_exitcode 1 $? > "${c_exitfile}"
+	)
+
+	setup_check "scrypt enc stdout flush error"
+	grep -q "scrypt: Error writing file: standard output" "${stderr_flush}"
 	echo $? > "${c_exitfile}"
 }
