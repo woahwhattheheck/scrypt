@@ -64,6 +64,16 @@ scenario_cmd() {
 	    grep -q "If -p is set, --logN and -r must also be set"
 	echo $? > "${c_exitfile}"
 
+	# Explicit parameters are encryption-only; "dec" must reject them
+	# instead of reaching the assertion in scryptdec_file_prep.
+	setup_check "scrypt dec Nrp rejected"
+	echo "${password}" | ${c_valgrind_cmd} "${bindir}/scrypt"	\
+	    dec --logN 12 -r 2 -p 3					\
+	    --passphrase dev:stdin-once					\
+	    "${encrypted_file}" 2>&1 |					\
+	    grep -q "\--logN, -r and -p cannot be used when decrypting"
+	echo $? > "${c_exitfile}"
+
 	# NaN is not a numeric value within any bounded resource range.
 	setup_check "scrypt rejects NaN maxmem fraction"
 	${c_valgrind_cmd} "${bindir}/scrypt" info -m NaN		\
