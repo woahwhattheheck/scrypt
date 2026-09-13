@@ -1,0 +1,42 @@
+name: ZC613 source bridge
+
+on:
+  push:
+    branches:
+      - zc613/scrypt-info-header-validation-20260913
+
+permissions:
+  contents: read
+
+jobs:
+  materialize:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout current successor base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reproduce the stale-branch merge
+        shell: bash
+        run: |
+          set -u
+          git fetch --no-tags origin scrypt-info-header-validation
+          git config user.name source-bridge
+          git config user.email source-bridge@invalid.example
+          set +e
+          git merge --no-commit --no-ff origin/scrypt-info-header-validation
+          merge_rc=$?
+          set -e
+          mkdir -p /tmp/zc613-bridge
+          printf '%s\n' "$merge_rc" > /tmp/zc613-bridge/merge-exit.txt
+          git diff --name-only --diff-filter=U > /tmp/zc613-bridge/conflicts.txt || true
+          tar --exclude=.git -czf /tmp/zc613-bridge/source.tgz .
+      - name: Upload bounded source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zc613-scrypt-source-bridge
+          path: /tmp/zc613-bridge
+          if-no-files-found: error
+          retention-days: 1
