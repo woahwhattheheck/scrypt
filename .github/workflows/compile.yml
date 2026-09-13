@@ -6,6 +6,11 @@ on:
 
   workflow_dispatch:
 
+# Superseded PR/ref runs do not need to consume both Ubuntu and macOS runners.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   # Shared variables amongst all projects / platforms / compilers.
   CFLAGS_ALL: -std=c99 -O2
