@@ -672,12 +672,14 @@ scryptenc_file(FILE * infile, FILE * outfile,
 	}
 
 	/* Zero sensitive data. */
+	insecure_memzero(buf, sizeof(buf));
 	insecure_memzero(dk, 64);
 
 	/* Success! */
 	return (SCRYPT_OK);
 
 err1:
+	insecure_memzero(buf, sizeof(buf));
 	insecure_memzero(dk, 64);
 
 	/* Failure! */
@@ -899,10 +901,15 @@ scryptdec_file_copy(struct scryptdec_file_cookie * C, FILE * outfile)
 		goto err0;
 	}
 
+	/* Zero decrypted data from the working buffer. */
+	insecure_memzero(buf, sizeof(buf));
+
 	/* Success! */
 	return (SCRYPT_OK);
 
 err0:
+	insecure_memzero(buf, sizeof(buf));
+
 	/* Failure! */
 	return (rc);
 }
