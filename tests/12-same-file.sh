@@ -119,6 +119,75 @@ scenario_cmd() {
 		done
 	done
 
+
+	# Exercise the race between the early path check and the destructive
+	# output open.  A FIFO passphrase source gives us a deterministic gate:
+	# once the writer has opened the FIFO, scrypt has already completed the
+	# early same_file() check and is blocked reading the passphrase.
+	race_input="${s_basename}-race-input"
+	race_output="${s_basename}-race-output"
+	race_passfifo="${s_basename}-race-passphrase"
+	race_ready="${s_basename}-race-ready"
+	race_go="${s_basename}-race-go"
+	race_stderr="${s_basename}-race.stderr"
+	cp "${reference_file}" "${race_input}"
+	cp "${reference_file}" "${race_output}"
+	rm -f "${race_passfifo}" "${race_ready}" "${race_go}"
+	mkfifo "${race_passfifo}"
+
+	(
+		exec 3> "${race_passfifo}"
+		: > "${race_ready}"
+		while [ ! -e "${race_go}" ]; do
+			sleep 1
+		done
+		printf '%s\n' "${password}" >&3
+		exec 3>&-
+	) &
+	race_writer_pid=$!
+
+	setup_check "scrypt enc rejects output swapped to input after precheck"
+	${c_valgrind_cmd} "${bindir}/scrypt" enc --logN 10 -r 1 -p 1 \
+	    --passphrase file:"${race_passfifo}" \
+	    "${race_input}" "${race_output}" 2> "${race_stderr}" &
+	race_scrypt_pid=$!
+
+	race_wait_ready() {
+		[ ! -e "${race_ready}" ]
+	}
+	if wait_while 5000 race_wait_ready; then
+		rm -f "${race_output}"
+		ln "${race_input}" "${race_output}"
+		: > "${race_go}"
+
+		wait "${race_scrypt_pid}"
+		race_rc=$?
+		wait "${race_writer_pid}"
+		race_writer_rc=$?
+		if [ "${race_writer_rc}" -ne 0 ]; then
+			race_rc=1
+		fi
+		expected_exitcode 1 "${race_rc}" > "${c_exitfile}"
+	else
+		: > "${race_go}"
+		kill "${race_scrypt_pid}" 2>/dev/null || true
+		kill "${race_writer_pid}" 2>/dev/null || true
+		wait "${race_scrypt_pid}" 2>/dev/null || true
+		wait "${race_writer_pid}" 2>/dev/null || true
+		echo 1 > "${c_exitfile}"
+	fi
+
+	setup_check "scrypt enc path-swap race reports same file"
+	grep -q "scrypt: Input and output files are the same" \
+	    "${race_stderr}"
+	echo $? > "${c_exitfile}"
+
+	setup_check "scrypt enc path-swap race preserves input"
+	cmp -s "${race_input}" "${reference_file}"
+	echo $? > "${c_exitfile}"
+
+	rm -f "${race_passfifo}" "${race_ready}" "${race_go}"
+
 	# A character device is not a destructive same-regular-file alias.
 	setup_check "scrypt enc permits same null device"
 	${c_valgrind_cmd} "${bindir}/scrypt" enc --logN 10 -r 1 -p 1 \
