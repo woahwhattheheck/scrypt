@@ -14,6 +14,8 @@ decrypted_no_file="${s_basename}-decrypt-no-file.txt"
 cr_passphrase_file="${s_basename}-passphrase-cr.txt"
 decrypted_cr_file="${s_basename}-decrypt-cr.txt"
 decrypted_cr_log="${s_basename}-decrypt-cr.log"
+encrypted_cr_file="${s_basename}-encrypt-cr.enc"
+encrypted_cr_log="${s_basename}-encrypt-cr.log"
 crlf_passphrase_file="${s_basename}-passphrase-crlf.txt"
 decrypted_crlf_file="${s_basename}-decrypt-crlf.txt"
 
@@ -93,6 +95,25 @@ scenario_cmd() {
 	# We should not have created a file.
 	setup_check "scrypt dec file stray CR no file"
 	test -e "${decrypted_cr_file}"
+	expected_exitcode 1 $? > "${c_exitfile}"
+
+	# Encryption must reject the same malformed passphrase file rather than
+	# silently encrypting with the prefix before the carriage return.
+	setup_check "scrypt enc file stray CR"
+	${c_valgrind_cmd} "${bindir}/scrypt"				\
+	    enc --passphrase file:"${cr_passphrase_file}"		\
+	    "${reference_file}" "${encrypted_cr_file}"		\
+	    2> "${encrypted_cr_log}"
+	expected_exitcode 1 $? > "${c_exitfile}"
+
+	# We should have received the same malformed-passphrase diagnostic.
+	setup_check "scrypt enc file stray CR error"
+	grep -q "carriage return or newline" "${encrypted_cr_log}"
+	echo "$?" > "${c_exitfile}"
+
+	# We should not have created an encrypted output file.
+	setup_check "scrypt enc file stray CR no file"
+	test -e "${encrypted_cr_file}"
 	expected_exitcode 1 $? > "${c_exitfile}"
 
 	# A passphrase file with CRLF line endings must still work.
