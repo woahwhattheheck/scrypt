@@ -102,10 +102,31 @@ err0:
 }
 
 /**
+ * same_destructive_object(sb_in, sb_out):
+ * Return non-zero if the two stat results identify storage which scrypt must
+ * not read and write at the same time.  Regular files are identified by
+ * device/inode; block-device aliases are identified by the underlying device.
+ * Character devices such as /dev/null remain permitted.
+ */
+static int
+same_destructive_object(const struct stat * sb_in, const struct stat * sb_out)
+{
+
+	if (S_ISREG(sb_in->st_mode) && S_ISREG(sb_out->st_mode))
+		return ((sb_in->st_dev == sb_out->st_dev) &&
+		    (sb_in->st_ino == sb_out->st_ino));
+
+	if (S_ISBLK(sb_in->st_mode) && S_ISBLK(sb_out->st_mode))
+		return (sb_in->st_rdev == sb_out->st_rdev);
+
+	return (0);
+}
+
+/**
  * same_file(infile, outfilename):
  * Return non-zero if the already-open ${infile} and the path ${outfilename}
- * refer to the same regular file.  If we cannot tell -- most importantly if
- * ${outfilename} does not exist yet -- return zero.
+ * identify the same destructive storage object.  If we cannot tell -- most
+ * importantly if ${outfilename} does not exist yet -- return zero.
  */
 static int
 same_file(FILE * infile, const char * outfilename)
@@ -119,24 +140,15 @@ same_file(FILE * infile, const char * outfilename)
 	if (stat(outfilename, &sb_out))
 		return (0);
 
-	/*
-	 * Only a regular file can be destroyed this way; opening a character
-	 * device such as /dev/null for writing does not discard the data we
-	 * are about to read.
-	 */
-	if (!S_ISREG(sb_in.st_mode) || !S_ISREG(sb_out.st_mode))
-		return (0);
-
-	/* The same device and inode is the same file. */
-	return ((sb_in.st_dev == sb_out.st_dev) &&
-	    (sb_in.st_ino == sb_out.st_ino));
+	return (same_destructive_object(&sb_in, &sb_out));
 }
 
 /**
  * open_output(infile, outfilename, outfile):
  * Open ${outfilename} for writing without truncating it until the descriptor
  * we actually opened has been proved to be different from ${infile}.  Return
- * 1 if both descriptors identify the same regular file, -1 on error, and 0
+ * 1 if both descriptors identify the same destructive object, -1 on error,
+ * and 0
  * on success with ${outfile} set.
  */
 static int
@@ -156,9 +168,7 @@ open_output(FILE * infile, const char * outfilename, FILE ** outfile)
 		goto err0;
 	if (fstat(fd, &sb_out))
 		goto err0;
-	if (S_ISREG(sb_in.st_mode) && S_ISREG(sb_out.st_mode) &&
-	    (sb_in.st_dev == sb_out.st_dev) &&
-	    (sb_in.st_ino == sb_out.st_ino)) {
+	if (same_destructive_object(&sb_in, &sb_out)) {
 		(void)close(fd);
 		return (1);
 	}
