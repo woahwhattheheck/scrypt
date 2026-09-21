@@ -90,15 +90,11 @@ readpass_readline(char * buf, size_t buflen, FILE * f)
 	if (ch == '\n')
 		return (0);
 	if (ch == '\r') {
-		if ((next = fgetc(f)) == EOF) {
-			if (ferror(f)) {
-				warnp("Cannot read password");
-				return (-1);
-			}
-			return (0);
-		}
-		if ((next != '\n') && (ungetc(next, f) == EOF)) {
-			warnp("Cannot unread password input");
+		do {
+			next = fgetc(f);
+		} while ((next != '\n') && (next != EOF));
+		if ((next == EOF) && ferror(f)) {
+			warnp("Cannot read password");
 			return (-1);
 		}
 		return (0);
