@@ -23,6 +23,7 @@ readpass_file(char ** passwd, const char * filename)
 	FILE * f;
 	char passbuf[MAXPASSLEN];
 	size_t len;
+	int ch;
 
 	/* Open the file. */
 	if ((f = fopen(filename, "r")) == NULL) {
@@ -41,9 +42,15 @@ readpass_file(char ** passwd, const char * filename)
 		}
 	}
 
-	/* Bail if there's the line is too long, or if there's a second line. */
-	if (fgetc(f) != EOF) {
+	/* Bail if the line is too long, or if there's a second line. */
+	if ((ch = fgetc(f)) != EOF) {
 		warn0("line too long, or more than 1 line in %s", filename);
+		goto err2;
+	}
+
+	/* Do not mistake a read failure for clean end-of-file. */
+	if (ferror(f)) {
+		warnp("fgetc(%s)", filename);
 		goto err2;
 	}
 
