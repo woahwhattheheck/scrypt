@@ -1,0 +1,36 @@
+name: Validate stdout alias
+on:
+  push:
+    branches: [validation/scrypt-stdout-alias-20261004]
+permissions:
+  contents: read
+jobs:
+  stdout-alias:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the documented build prerequisite
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends autoconf-archive
+      - name: Compile the unchanged parent and candidate
+        env:
+          CFLAGS: -std=c99 -O2 -Wall -Wextra
+        run: |
+          git show 14db0e0600340f8254fe602fd07e25a8fe3f59ad:main.c > main.c
+          test "$(git hash-object main.c)" = 6e5c6524ff94fcc4cd1f4a90a474d33f0818ce05
+          autoreconf -i
+          ./configure
+          make -j2
+          cp scrypt "$RUNNER_TEMP/scrypt-before"
+          git show HEAD:main.c > main.c
+          touch main.c
+          make -j2
+          cp scrypt "$RUNNER_TEMP/scrypt-after"
+          sh -n tests/12-same-file.sh
+      - name: Run bounded actual CLI before and after
+        run: python3 .github/validate-scrypt-stdout.py "$RUNNER_TEMP/scrypt-before" "$RUNNER_TEMP/scrypt-after"
