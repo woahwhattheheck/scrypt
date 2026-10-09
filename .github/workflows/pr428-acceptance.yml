@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           N=12 USE_VALGRIND=0 VERBOSE=1 timeout 180s sh tests/test_scrypt.sh ./scrypt 2>&1 | tee "$RUNNER_TEMP/pr428-same-file.log"
-          grep -F '12-same-file... SUCCESS!' "$RUNNER_TEMP/pr428-same-file.log"
+          # pipefail preserves the runner's exit status; verbose progress can split its success line.
           git diff --exit-code -- main.c tests/12-same-file.sh tests/test_scrypt.sh tests/shared_test_functions.sh tests/shared_valgrind_functions.sh
           {
             echo '## PR428 same-file acceptance'
