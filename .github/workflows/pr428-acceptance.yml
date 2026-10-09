@@ -1,0 +1,74 @@
+name: PR428 exact-head same-file acceptance
+
+on:
+  push:
+    branches: [acceptance/pr428-ff39f623-20261009-astra]
+    paths: [.github/workflows/pr428-acceptance.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr428-ff39f623-acceptance
+  cancel-in-progress: false
+
+jobs:
+  same-file:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CANDIDATE: ff39f6231fb12fc7171492d2b063b960b4bb2664
+    steps:
+      - name: Fetch immutable public contribution without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init source
+          cd source
+          git remote add origin https://github.com/woahwhattheheck/scrypt.git
+          git -c credential.helper= fetch --no-tags --depth=1 origin "$CANDIDATE"
+          git checkout --detach FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$CANDIDATE"
+          git status --porcelain
+          git ls-files -s main.c tests/12-same-file.sh tests/test_scrypt.sh tests/shared_test_functions.sh tests/shared_valgrind_functions.sh
+          uname -a
+          cc --version | head -n 1
+      - name: Install build prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends autoconf automake libtool autoconf-archive
+      - name: Build unchanged current contribution
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          autoreconf -fi
+          ./configure CFLAGS='-std=c99 -O2'
+          make -j2
+          sha256sum scrypt
+      - name: Execute existing same-file acceptance scenario only
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          N=12 USE_VALGRIND=0 VERBOSE=1 timeout 180s sh tests/test_scrypt.sh ./scrypt 2>&1 | tee "$RUNNER_TEMP/pr428-same-file.log"
+          grep -F '12-same-file... SUCCESS!' "$RUNNER_TEMP/pr428-same-file.log"
+          git diff --exit-code -- main.c tests/12-same-file.sh tests/test_scrypt.sh tests/shared_test_functions.sh tests/shared_valgrind_functions.sh
+          {
+            echo '## PR428 same-file acceptance'
+            echo "Exact tested contribution: $CANDIDATE"
+            echo 'Built unchanged with Autotools and GCC on standard Ubuntu 24.04.'
+            echo 'Executed only existing scenario 12 through the project runner, without Valgrind.'
+            echo '```text'
+            cat "$RUNNER_TEMP/pr428-same-file.log"
+            echo '```'
+            echo 'This does not establish other platforms, full-suite success, maintainer acceptance or a bounty award.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Print focused failure diagnostics
+        if: failure()
+        working-directory: source
+        shell: bash
+        run: |
+          if [ -d tests-output ]; then
+            find tests-output -maxdepth 1 -type f \( -name '*.exit' -o -name '*.desc' -o -name '*.stderr' \) -print -exec cat {} \;
+          fi
